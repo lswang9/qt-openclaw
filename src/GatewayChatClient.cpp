@@ -68,7 +68,8 @@ void GatewayChatClient::sendUserMessage(const QString &text)
     if (token.isEmpty())
         token = GatewayConfig::ensureGatewayToken();
     if (token.isEmpty()) {
-        emit errorOccurred(tr("缺少 Gateway token，请先在设置中保存 API Key。"));
+        emit logMessage(tr("[chat] missing gateway token"));
+        emit errorOccurred(tr("还没准备好，请先在「设置」里填入 API Key。"));
         return;
     }
     m_token = token;
@@ -100,20 +101,23 @@ void GatewayChatClient::onReplyFinished()
         QString detail = QString::fromUtf8(body).trimmed();
         if (detail.size() > 400)
             detail = detail.left(400) + QStringLiteral("…");
-        emit errorOccurred(tr("Gateway 错误: %1 (%2)").arg(reply->errorString(), detail));
+        emit logMessage(tr("[chat] gateway error: %1 (%2)").arg(reply->errorString(), detail));
+        emit errorOccurred(tr("暂时连不上，请确认已点「连上」，稍后再试。"));
         emit requestFinished();
         return;
     }
     const QJsonArray choices = QJsonDocument::fromJson(body).object().value(QStringLiteral("choices")).toArray();
     if (choices.isEmpty()) {
-        emit errorOccurred(tr("Gateway 返回无 choices。"));
+        emit logMessage(tr("[chat] empty choices"));
+        emit errorOccurred(tr("没有收到回复，请稍后再试。"));
         emit requestFinished();
         return;
     }
     QString content = choices.at(0).toObject().value(QStringLiteral("message")).toObject()
                           .value(QStringLiteral("content")).toString();
     if (content.isEmpty()) {
-        emit errorOccurred(tr("Gateway 返回空消息。"));
+        emit logMessage(tr("[chat] empty message"));
+        emit errorOccurred(tr("没有收到回复，请稍后再试。"));
         emit requestFinished();
         return;
     }

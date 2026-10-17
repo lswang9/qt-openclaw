@@ -55,6 +55,8 @@ QStringList LocalGatewayProcess::runtimeSearchRoots() const
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("../runtime"));
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("runtime"));
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("../../runtime"));
+    roots << QDir(appDir).absoluteFilePath(QStringLiteral("../../../runtime"));
+    roots << QDir(appDir).absoluteFilePath(QStringLiteral("../../../../runtime"));
     roots << QDir::current().absoluteFilePath(QStringLiteral("runtime"));
     roots.removeDuplicates();
     return roots;
@@ -94,7 +96,7 @@ QString LocalGatewayProcess::findOpenclawCli() const
         }
     }
     m_resolveError = tr(
-        "未找到 OpenClaw CLI。请运行 ./scripts/setup-runtime.sh，或安装 openclaw 到 PATH。");
+        "未找到本地运行时（runtime/bin 或 PATH 中的 openclaw）。");
     return {};
 }
 

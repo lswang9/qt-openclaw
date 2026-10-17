@@ -44,6 +44,8 @@ private:
     void refreshBackground();
     void appendChatBubble(const QString &who, const QString &text, bool fromUser);
     void ensureApiKeyOrPrompt();
+    void updateLogVisibility();
+    QString plainChatError(const QString &raw) const;
 
     QWidget *m_chatChrome = nullptr;
     QLabel *m_bgLabel = nullptr;

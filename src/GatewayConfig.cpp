@@ -99,6 +99,8 @@ QString GatewayConfig::findOpenclawCli(QString *errorOut)
     const QStringList candidates = {
         QDir(appDir).absoluteFilePath(QStringLiteral("../runtime/bin/openclaw")),
         QDir(appDir).absoluteFilePath(QStringLiteral("../../runtime/bin/openclaw")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../../../runtime/bin/openclaw")),
+        QDir(appDir).absoluteFilePath(QStringLiteral("../../../../runtime/bin/openclaw")),
         QDir::current().absoluteFilePath(QStringLiteral("runtime/bin/openclaw")),
         QDir(appDir).absoluteFilePath(QStringLiteral("../runtime/node_modules/.bin/openclaw")),
         QDir::current().absoluteFilePath(QStringLiteral("runtime/node_modules/.bin/openclaw")),
@@ -114,7 +116,7 @@ QString GatewayConfig::findOpenclawCli(QString *errorOut)
         return homeBin;
 
     if (errorOut)
-        *errorOut = QStringLiteral("openclaw CLI not found (runtime/ or PATH)");
+        *errorOut = QStringLiteral("local runtime not found");
     return {};
 }
 

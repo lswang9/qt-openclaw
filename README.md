@@ -42,10 +42,11 @@ export PATH="$HOME/.conan2/p/cmake6cfb420416116/p/CMake.app/Contents/bin:$HOME/L
 conan install . --output-folder=build --build=missing -s build_type=Release
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/build/Release/generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/qt-openclaw
+open "build/器灵 Agent.app"
 ```
 
-产物：`/Users/wangyupeng/Desktop/dev/qt-openclaw/build/qt-openclaw`
+产物（可双击）：`/Users/wangyupeng/Desktop/dev/qt-openclaw/build/器灵 Agent.app`  
+（构建后自动跑 `macdeployqt` 打包 Qt 依赖。）
 
 Runtime（国内）：`./scripts/setup-runtime.sh`
 

@@ -35,6 +35,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_gateway->setPort(GatewayConfig::kDefaultGatewayPort);
     setupUi();
+    updateLogVisibility();
 
     QSettings s(QString::fromUtf8(kOrg), QString::fromUtf8(kApp));
     const QString roleId = s.value(QString::fromUtf8(kKeyRole),
@@ -61,7 +62,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     if (!SettingsDialog::hasApiKey())
-        appendLog(tr("[settings] 尚未配置 DeepSeek Key — 点设置写入 ~/.qiling-agent"));
+        appendLog(tr("[settings] DeepSeek Key not configured yet"));
 }
 
 MainWindow::~MainWindow()
@@ -177,14 +178,35 @@ void MainWindow::setupUi()
     m_logView = new QPlainTextEdit(central);
     m_logView->setReadOnly(true);
     m_logView->setMaximumBlockCount(2000);
-    m_logView->setMaximumHeight(120);
-    m_logView->setPlaceholderText(tr("技术日志（可忽略）…"));
+    m_logView->setMaximumHeight(140);
+    m_logView->setPlaceholderText(tr("技术日志…"));
     m_logView->setStyleSheet(QStringLiteral("font-size: 11px; color: #888;"));
+    m_logView->hide();
 
     auto *layout = new QVBoxLayout(central);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_chatChrome, 1);
     layout->addWidget(m_logView);
+}
+
+void MainWindow::updateLogVisibility()
+{
+    if (m_logView)
+        m_logView->setVisible(SettingsDialog::showTechLog());
+}
+
+QString MainWindow::plainChatError(const QString &raw) const
+{
+    const QString lower = raw.toLower();
+    if (lower.contains(QLatin1String("api key")) || lower.contains(QLatin1String("token"))
+        || raw.contains(QStringLiteral("Key")))
+        return tr("还没准备好，请先在「设置」里填入 API Key。");
+    if (lower.contains(QLatin1String("connection")) || lower.contains(QLatin1String("refused"))
+        || lower.contains(QLatin1String("timed out")) || raw.contains(QStringLiteral("连不上")))
+        return tr("暂时连不上，请先点「连上」，稍后再试。");
+    if (raw.contains(QStringLiteral("choices")) || raw.contains(QStringLiteral("空消息")))
+        return tr("没有收到回复，请稍后再试。");
+    return tr("出了点问题，请稍后再试。");
 }
 
 void MainWindow::applyRole(const QString &roleId, bool resetChat)
@@ -199,7 +221,7 @@ void MainWindow::applyRole(const QString &roleId, bool resetChat)
     m_roleNameLabel->setText(m_roleDisplayName);
     if (resetChat) {
         m_chat->clearHistory();
-            m_chatList->clear();
+        m_chatList->clear();
         appendChatBubble(m_roleDisplayName, role.welcomeMessage, false);
     }
 
@@ -235,8 +257,10 @@ void MainWindow::ensureApiKeyOrPrompt()
 {
     if (!SettingsDialog::hasApiKey()) {
         SettingsDialog dlg(this);
-        if (dlg.exec() == QDialog::Accepted)
+        if (dlg.exec() == QDialog::Accepted) {
             SettingsDialog::loadInto(m_chat);
+            updateLogVisibility();
+        }
     }
 }
 
@@ -244,7 +268,9 @@ void MainWindow::onConnectClicked()
 {
     ensureApiKeyOrPrompt();
     if (!SettingsDialog::hasApiKey()) {
-        appendLog(tr("[chat] 需要先保存 DeepSeek Key"));
+        QMessageBox::information(this, tr("需要 API Key"),
+                                 tr("请先在「设置」里填入 DeepSeek API Key。"));
+        appendLog(tr("[chat] need DeepSeek Key before connect"));
         return;
     }
     QString err;
@@ -258,10 +284,9 @@ void MainWindow::onConnectClicked()
     }
     const QString cli = m_gateway->resolvedCliPath();
     if (cli.isEmpty()) {
-        QMessageBox::warning(this, tr("未找到 Gateway"),
-                             m_gateway->resolveError()
-                                 + QStringLiteral("\n\n")
-                                 + tr("提示：./scripts/setup-runtime.sh（npmmirror）"));
+        appendLog(tr("[gateway] %1").arg(m_gateway->resolveError()));
+        QMessageBox::warning(this, tr("无法启动"),
+                             tr("暂时无法启动本地服务。请确认已完成安装后再试。"));
         return;
     }
     m_gateway->start();
@@ -284,7 +309,10 @@ void MainWindow::onSettingsClicked()
     SettingsDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) {
         SettingsDialog::loadInto(m_chat);
-        appendLog(tr("[settings] Key 已写入 ~/.qiling-agent"));
+        updateLogVisibility();
+        appendLog(tr("[settings] Key saved"));
+    } else {
+        updateLogVisibility();
     }
 }
 
@@ -299,6 +327,8 @@ void MainWindow::onSendClicked()
 {
     ensureApiKeyOrPrompt();
     if (!SettingsDialog::hasApiKey()) {
+        QMessageBox::information(this, tr("需要 API Key"),
+                                 tr("请先在「设置」里填入 DeepSeek API Key。"));
         appendLog(tr("[chat] aborted: no API key"));
         return;
     }
@@ -306,8 +336,7 @@ void MainWindow::onSendClicked()
         onConnectClicked();
         if (!m_gateway->isRunning()) {
             QMessageBox::information(this, tr("请先连上"),
-                                     tr("请先点「连上」启动本地 Gateway（端口 %1）。")
-                                         .arg(GatewayConfig::kDefaultGatewayPort));
+                                     tr("请先点「连上」，连上后再说话。"));
             return;
         }
     }
@@ -330,7 +359,7 @@ void MainWindow::onAssistantMessage(const QString &text)
 void MainWindow::onChatError(const QString &message)
 {
     appendLog(QStringLiteral("[chat] %1").arg(message));
-    appendChatBubble(tr("错误"), message, false);
+    appendChatBubble(tr("提示"), plainChatError(message), false);
 }
 
 void MainWindow::onChatBusyChanged()
@@ -349,7 +378,8 @@ void MainWindow::appendChatBubble(const QString &who, const QString &text, bool 
 
 void MainWindow::appendLog(const QString &line)
 {
-    m_logView->appendPlainText(line);
+    if (m_logView)
+        m_logView->appendPlainText(line);
 }
 
 void MainWindow::setStatus(const QString &text)
