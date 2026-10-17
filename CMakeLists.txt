@@ -6,7 +6,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebSockets)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebSockets WebEngineWidgets)
 
 set(QT_OPENCLAW_SOURCES
     src/main.cpp
@@ -39,10 +40,10 @@ else()
     add_executable(qt-openclaw ${QT_OPENCLAW_SOURCES})
 endif()
 
-target_link_libraries(qt-openclaw PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets)
+target_link_libraries(qt-openclaw PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets Qt6::WebEngineWidgets)
 
 if(APPLE)
-    # Prefer CMakeCache / toolchain macdeployqt (Conan Qt); fall back to PATH.
     if(NOT MACDEPLOYQT_EXECUTABLE)
         find_program(MACDEPLOYQT_EXECUTABLE macdeployqt)
     endif()
@@ -53,8 +54,5 @@ if(APPLE)
                     -always-overwrite
             COMMENT "Deploy Qt frameworks into 器灵 Agent.app"
             VERBATIM)
-        message(STATUS "macdeployqt: ${MACDEPLOYQT_EXECUTABLE}")
-    else()
-        message(WARNING "macdeployqt not found; .app may miss Qt frameworks")
     endif()
 endif()

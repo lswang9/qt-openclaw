@@ -28,8 +28,9 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     resize(480, 260);
 
     auto *hint = new QLabel(
-        tr("在这里填入 DeepSeek API Key，保存后即可点「连上」开始聊天。\n"
-           "Key 只会保存在本机，不会显示在聊天界面。"),
+        tr("填入 DeepSeek API Key，保存后点「连上」启动 Gateway，\n"
+           "窗口内嵌官方 Control UI（http://127.0.0.1:19889/）。\n"
+           "内部：openclaw --profile qiling models auth paste-api-key。"),
         this);
     hint->setWordWrap(true);
 
@@ -75,11 +76,12 @@ void SettingsDialog::onSave()
     if (!api.isEmpty()) {
         QString err;
         if (!GatewayConfig::configureDeepSeekViaCli(api, &err)) {
+            QString detail = err.trimmed();
+            if (detail.size() > 280)
+                detail = detail.left(280) + QStringLiteral("…");
             QMessageBox::warning(
                 this, tr("保存失败"),
-                tr("暂时没法保存 Key。请确认本机服务已装好，关掉其它冲突的服务后再试。\n"
-                   "若仍失败，可先点主界面「连上」再回来保存。"));
-            // Keep technical detail only for developers who enable log later
+                tr("暂时没法保存 Key。请确认本机服务已装好后再试。\n\n%1").arg(detail));
             qWarning("SettingsDialog save failed: %s", qPrintable(err));
             return;
         }

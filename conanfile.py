@@ -7,30 +7,32 @@ class QtOpenclawConan(ConanFile):
     version = "0.1.0"
     package_type = "application"
     settings = "os", "compiler", "build_type", "arch"
-    options = {
-        "shared": [True, False],
-    }
+    options = {"shared": [True, False]}
     default_options = {
-        "shared": True,  # LGPL-friendly dynamic link of Qt
+        "shared": True,
         "qt/*:shared": True,
         "qt/*:qtbase": True,
-        "qt/*:qtdeclarative": False,
-        "qt/*:qttools": False,
-        "qt/*:qtwebsockets": True,
-        "qt/*:with_freetype": True,
         "qt/*:gui": True,
         "qt/*:widgets": True,
+        "qt/*:with_freetype": True,
+        "qt/*:openssl": True,
+        # qt_quick_enabled = gui && qtshadertools — required for WebEngine Support check
+        "qt/*:qtshadertools": True,
+        "qt/*:qtdeclarative": True,
+        "qt/*:qtwebchannel": True,
+        "qt/*:qtpositioning": True,
+        "qt/*:qtwebsockets": True,
+        "qt/*:qtsvg": True,
+        "qt/*:qtwebengine": True,
+        "qt/*:qttools": False,
     }
 
     def requirements(self):
-        # Pin a recent Qt 6 from Conan Center; bump when needed.
         self.requires("qt/6.7.3")
 
     def layout(self):
         cmake_layout(self)
 
     def generate(self):
-        deps = CMakeDeps(self)
-        deps.generate()
-        tc = CMakeToolchain(self)
-        tc.generate()
+        CMakeDeps(self).generate()
+        CMakeToolchain(self).generate()

@@ -174,10 +174,12 @@ bool GatewayConfig::configureDeepSeekViaCli(const QString &apiKey, QString *erro
            {}, &out, &err);
 
     // Auth via official paste-api-key (key on stdin; never logged)
+    // OpenClaw 2026.9.7+: multi-agent profiles require an explicit owner.
     const bool ok = runCli(cli,
                            withProfile({QStringLiteral("models"), QStringLiteral("auth"),
                                         QStringLiteral("paste-api-key"),
-                                        QStringLiteral("--provider"), QStringLiteral("deepseek")}),
+                                        QStringLiteral("--provider"), QStringLiteral("deepseek"),
+                                        QStringLiteral("--agent"), QStringLiteral("main")}),
                            key.toUtf8() + '\n', &out, &err, 90000);
     if (!ok) {
         QString msg = err.trimmed().isEmpty() ? out.trimmed() : err.trimmed();
@@ -192,5 +194,54 @@ bool GatewayConfig::configureDeepSeekViaCli(const QString &apiKey, QString *erro
 
     ensureGatewayToken();
     qInfo() << "[GatewayConfig] DeepSeek key configured via --profile qiling → ~/.openclaw-qiling (key not logged)";
+    return true;
+}
+
+
+QString GatewayConfig::controlUiUrl()
+{
+    return QStringLiteral("http://127.0.0.1:%1/").arg(kDefaultGatewayPort);
+}
+
+bool GatewayConfig::ensureQilingBrandPlugin(QString *errorOut)
+{
+    QString findErr;
+    const QString cli = findOpenclawCli(&findErr);
+    if (cli.isEmpty()) {
+        if (errorOut)
+            *errorOut = findErr;
+        return false;
+    }
+
+    QString out, err;
+    // True source: https://github.com/lswang9/qiling-brand @ v0.1.1 (brandContractVersion=1; pin tag, never bare main)
+    // Do NOT install from resources/control-ui-themes (pointer README only).
+    const bool installed = runCli(
+        cli,
+        withProfile({QStringLiteral("plugins"), QStringLiteral("install"),
+                     QStringLiteral("github:lswang9/qiling-brand#v0.1.1"),
+                     QStringLiteral("--force"), QStringLiteral("--accept-capabilities")}),
+        {}, &out, &err, 180000);
+    if (!installed) {
+        QString msg = err.trimmed().isEmpty() ? out.trimmed() : err.trimmed();
+        if (msg.size() > 600)
+            msg = msg.left(600) + QStringLiteral("…");
+        if (errorOut)
+            *errorOut = QStringLiteral("plugins install github:lswang9/qiling-brand#v0.1.1 failed: %1")
+                            .arg(msg);
+        return false;
+    }
+
+    runCli(cli,
+           withProfile({QStringLiteral("plugins"), QStringLiteral("enable"),
+                        QStringLiteral("qiling-brand"), QStringLiteral("--accept-capabilities")}),
+           {}, &out, &err, 60000);
+
+    runCli(cli,
+           withProfile({QStringLiteral("plugins"), QStringLiteral("reload"),
+                        QStringLiteral("qiling-brand")}),
+           {}, &out, &err, 30000);
+
+    qInfo() << "[GatewayConfig] qiling-brand ensured via github:lswang9/qiling-brand#v0.1.1";
     return true;
 }
