@@ -1,0 +1,7 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+  <file>characters/babata/avatar.jpg</file>
+  <file>characters/babata/bg.jpg</file>
+  <file>characters/yinyue/avatar.jpg</file>
+  <file>characters/yinyue/bg.jpg</file>
+</qresource></RCC>

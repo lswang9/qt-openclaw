@@ -1,10 +1,11 @@
 #include "LocalGatewayProcess.h"
+#include "GatewayConfig.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QStandardPaths>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 
 LocalGatewayProcess::LocalGatewayProcess(QObject *parent)
     : QObject(parent)
@@ -18,7 +19,7 @@ LocalGatewayProcess::LocalGatewayProcess(QObject *parent)
     connect(m_process, &QProcess::errorOccurred, this, &LocalGatewayProcess::onErrorOccurred);
     connect(m_process, &QProcess::started, this, [this]() {
         emit logMessage(tr("[gateway] process started (pid %1)").arg(m_process->processId()));
-        emit statusChanged(tr("Gateway: running"));
+        emit statusChanged(tr("已就绪"));
         emit started();
     });
 }
@@ -50,15 +51,11 @@ QStringList LocalGatewayProcess::runtimeSearchRoots() const
     const QString envRuntime = qEnvironmentVariable("OPENCLAW_RUNTIME");
     if (!envRuntime.isEmpty())
         roots << envRuntime;
-
     const QString appDir = QCoreApplication::applicationDirPath();
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("../runtime"));
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("runtime"));
-
-    // Dev: binary often lives in build/; repo root is one level up.
     roots << QDir(appDir).absoluteFilePath(QStringLiteral("../../runtime"));
     roots << QDir::current().absoluteFilePath(QStringLiteral("runtime"));
-
     roots.removeDuplicates();
     return roots;
 }
@@ -68,7 +65,6 @@ QString LocalGatewayProcess::findNode() const
     const QString fromPath = QStandardPaths::findExecutable(QStringLiteral("node"));
     if (!fromPath.isEmpty())
         return fromPath;
-
     for (const QString &root : runtimeSearchRoots()) {
         const QString bundled = QDir(root).absoluteFilePath(QStringLiteral("bin/node"));
         if (QFileInfo::exists(bundled) && QFileInfo(bundled).isExecutable())
@@ -80,18 +76,14 @@ QString LocalGatewayProcess::findNode() const
 QString LocalGatewayProcess::findOpenclawCli() const
 {
     m_resolveError.clear();
-
     for (const QString &root : runtimeSearchRoots()) {
         const QString cli = QDir(root).absoluteFilePath(QStringLiteral("bin/openclaw"));
         if (QFileInfo::exists(cli) && QFileInfo(cli).isExecutable())
             return cli;
     }
-
     const QString onPath = QStandardPaths::findExecutable(QStringLiteral("openclaw"));
     if (!onPath.isEmpty())
         return onPath;
-
-    // node + entry.js under runtime/node_modules/openclaw
     const QString node = findNode();
     if (!node.isEmpty()) {
         for (const QString &root : runtimeSearchRoots()) {
@@ -101,10 +93,8 @@ QString LocalGatewayProcess::findOpenclawCli() const
                 return QStringLiteral("node+entry:%1|%2").arg(node, entry);
         }
     }
-
     m_resolveError = tr(
-        "OpenClaw CLI not found. Install globally (`npm install -g openclaw`), "
-        "or populate ./runtime (see README). Searched PATH and runtime/.");
+        "未找到 OpenClaw CLI。请运行 ./scripts/setup-runtime.sh，或安装 openclaw 到 PATH。");
     return {};
 }
 
@@ -120,13 +110,13 @@ LocalGatewayProcess::LaunchPlan LocalGatewayProcess::buildLaunchPlan()
     if (cli.isEmpty())
         return plan;
 
+    // Config written before start; no --allow-unconfigured
     const QStringList gatewayArgs = {
         QStringLiteral("gateway"),
         QStringLiteral("run"),
         QStringLiteral("--port"),
         QString::number(m_port),
         QStringLiteral("--verbose"),
-        QStringLiteral("--allow-unconfigured"),
     };
 
     if (cli.startsWith(QStringLiteral("node+entry:"))) {
@@ -155,26 +145,21 @@ void LocalGatewayProcess::start()
     const LaunchPlan plan = buildLaunchPlan();
     if (plan.program.isEmpty()) {
         emit logMessage(QStringLiteral("[gateway] %1").arg(m_resolveError));
-        emit statusChanged(tr("Gateway: not found"));
+        emit statusChanged(tr("未找到 Gateway"));
         return;
     }
 
     emit logMessage(tr("[gateway] starting: %1 %2")
                         .arg(plan.program, plan.arguments.join(QLatin1Char(' '))));
-    emit statusChanged(tr("Gateway: starting…"));
+    emit logMessage(tr("[gateway] OPENCLAW_STATE_DIR=%1").arg(GatewayConfig::stateDir()));
+    emit statusChanged(tr("正在连接…"));
 
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    GatewayConfig::applyProcessEnvironment(env);
+    m_process->setProcessEnvironment(env);
     m_process->setWorkingDirectory(plan.workingDirectory);
     m_process->setProgram(plan.program);
     m_process->setArguments(plan.arguments);
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    if (!m_deepSeekApiKey.isEmpty())
-        env.insert(QStringLiteral("DEEPSEEK_API_KEY"), m_deepSeekApiKey);
-    // Prefer user OpenClaw home so Gateway picks up ~/.openclaw/.env + openclaw.json
-    env.insert(QStringLiteral("OPENCLAW_HOME"),
-               QDir::home().absoluteFilePath(QStringLiteral(".openclaw")));
-    m_process->setProcessEnvironment(env);
-
     m_process->start();
 }
 
@@ -182,13 +167,10 @@ void LocalGatewayProcess::stop()
 {
     if (!isRunning())
         return;
-
     emit logMessage(tr("[gateway] stopping…"));
-    emit statusChanged(tr("Gateway: stopping…"));
-
+    emit statusChanged(tr("正在断开…"));
     m_process->terminate();
     if (!m_process->waitForFinished(5000)) {
-        emit logMessage(tr("[gateway] terminate timed out; killing"));
         m_process->kill();
         m_process->waitForFinished(3000);
     }
@@ -216,11 +198,9 @@ void LocalGatewayProcess::onReadyReadStderr()
 
 void LocalGatewayProcess::onFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
-    const QString how = (exitStatus == QProcess::CrashExit)
-                            ? tr("crashed")
-                            : tr("exited");
-    emit logMessage(tr("[gateway] %1 with code %2").arg(how).arg(exitCode));
-    emit statusChanged(tr("Gateway: stopped"));
+    Q_UNUSED(exitStatus);
+    emit logMessage(tr("[gateway] exited code %1").arg(exitCode));
+    emit statusChanged(tr("未连接"));
     emit stopped(exitCode, exitStatus);
 }
 
@@ -228,6 +208,6 @@ void LocalGatewayProcess::onErrorOccurred(QProcess::ProcessError error)
 {
     if (error == QProcess::FailedToStart) {
         emit logMessage(tr("[gateway] failed to start: %1").arg(m_process->errorString()));
-        emit statusChanged(tr("Gateway: failed to start"));
+        emit statusChanged(tr("启动失败"));
     }
 }

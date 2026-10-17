@@ -1,48 +1,57 @@
 #include "MainWindow.h"
-#include "GatewayClient.h"
+#include "CharacterSelectDialog.h"
+#include "GatewayChatClient.h"
+#include "GatewayConfig.h"
 #include "LocalGatewayProcess.h"
-#include "OpenClawConfigSync.h"
-#include "Persona.h"
+#include "RoleLoader.h"
 #include "SettingsDialog.h"
 
 #include <QCloseEvent>
-#include <QFormLayout>
-#include <QGroupBox>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
-#include <QRadioButton>
+#include <QResizeEvent>
+#include <QSettings>
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QWidget>
 
+namespace {
+constexpr auto kOrg = "qt-openclaw";
+constexpr auto kApp = "qt-openclaw";
+constexpr auto kKeyRole = "ui/roleId";
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , m_client(new GatewayClient(this))
+    , m_chat(new GatewayChatClient(this))
     , m_gateway(new LocalGatewayProcess(this))
 {
+    m_gateway->setPort(GatewayConfig::kDefaultGatewayPort);
     setupUi();
-    applySettingsToClient();
 
-    connect(m_localRadio, &QRadioButton::toggled, this, &MainWindow::onModeChanged);
-    connect(m_startGatewayButton, &QPushButton::clicked, this, &MainWindow::onStartGatewayClicked);
-    connect(m_stopGatewayButton, &QPushButton::clicked, this, &MainWindow::onStopGatewayClicked);
+    QSettings s(QString::fromUtf8(kOrg), QString::fromUtf8(kApp));
+    const QString roleId = s.value(QString::fromUtf8(kKeyRole),
+                                   QString::fromUtf8(RoleLoader::kDefaultRoleId)).toString();
+    applyRole(roleId, true);
+    SettingsDialog::loadInto(m_chat);
+
     connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::onConnectClicked);
-    connect(m_disconnectButton, &QPushButton::clicked, this, &MainWindow::onDisconnectClicked);
     connect(m_sendButton, &QPushButton::clicked, this, &MainWindow::onSendClicked);
     connect(m_settingsButton, &QPushButton::clicked, this, &MainWindow::onSettingsClicked);
+    connect(m_switchRoleButton, &QPushButton::clicked, this, &MainWindow::onSwitchRoleClicked);
 
-    connect(m_client, &GatewayClient::logMessage, this, &MainWindow::appendLog);
-    connect(m_client, &GatewayClient::statusChanged, this, &MainWindow::setStatus);
-    connect(m_client, &GatewayClient::assistantMessage, this, &MainWindow::onAssistantMessage);
-    connect(m_client, &GatewayClient::errorOccurred, this, &MainWindow::onChatError);
-    connect(m_client, &GatewayClient::requestStarted, this, &MainWindow::onChatBusyChanged);
-    connect(m_client, &GatewayClient::requestFinished, this, &MainWindow::onChatBusyChanged);
+    connect(m_chat, &GatewayChatClient::assistantMessage, this, &MainWindow::onAssistantMessage);
+    connect(m_chat, &GatewayChatClient::errorOccurred, this, &MainWindow::onChatError);
+    connect(m_chat, &GatewayChatClient::requestStarted, this, &MainWindow::onChatBusyChanged);
+    connect(m_chat, &GatewayChatClient::requestFinished, this, &MainWindow::onChatBusyChanged);
+    connect(m_chat, &GatewayChatClient::logMessage, this, &MainWindow::appendLog);
 
     connect(m_gateway, &LocalGatewayProcess::logMessage, this, &MainWindow::appendLog);
     connect(m_gateway, &LocalGatewayProcess::statusChanged, this, &MainWindow::setStatus);
@@ -50,20 +59,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_gateway, &LocalGatewayProcess::stopped, this, [this](int, QProcess::ExitStatus) {
         onGatewayStopped();
     });
-    connect(m_gateway, &LocalGatewayProcess::statusChanged, this, [this](const QString &s) {
-        if (s.contains(QStringLiteral("starting")))
-            updateGatewayButtons();
-    });
 
-    updateModeUi();
-    updateGatewayButtons();
-
-    // Welcome uses role name (巴巴塔), never product name 器灵 as self-intro
-    appendChatBubble(SettingsDialog::role(), Persona::welcomeMessage(SettingsDialog::role()));
-
-    if (!SettingsDialog::hasApiKey()) {
-        appendLog(tr("[settings] No DeepSeek API key yet — open Settings to configure Gateway."));
-    }
+    if (!SettingsDialog::hasApiKey())
+        appendLog(tr("[settings] 尚未配置 DeepSeek Key — 点设置写入 ~/.qiling-agent"));
 }
 
 MainWindow::~MainWindow()
@@ -76,326 +74,276 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     if (m_gateway && m_gateway->isRunning())
         m_gateway->stop();
-    m_client->disconnectFromGateway();
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    refreshBackground();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_chatChrome && event->type() == QEvent::Resize)
+        refreshBackground();
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(tr("%1 — OpenClaw Gateway").arg(Persona::productName()));
-    resize(900, 640);
+    setWindowTitle(tr("器灵 Agent"));
+    resize(920, 680);
 
     auto *central = new QWidget(this);
     setCentralWidget(central);
 
-    m_localRadio = new QRadioButton(tr("Local Gateway"), central);
-    m_remoteRadio = new QRadioButton(tr("Remote Gateway"), central);
-    m_localRadio->setChecked(true);
+    m_chatChrome = new QWidget(central);
+    m_chatChrome->installEventFilter(this);
+    m_chatChrome->setMinimumHeight(420);
 
-    auto *modeRow = new QHBoxLayout;
-    modeRow->addWidget(new QLabel(tr("Mode:"), central));
-    modeRow->addWidget(m_localRadio);
-    modeRow->addWidget(m_remoteRadio);
-    modeRow->addStretch();
-    m_settingsButton = new QPushButton(tr("Settings…"), central);
-    modeRow->addWidget(m_settingsButton);
+    m_bgLabel = new QLabel(m_chatChrome);
+    m_bgLabel->setScaledContents(false);
+    m_bgLabel->setAlignment(Qt::AlignCenter);
+    m_bgLabel->lower();
 
-    m_localGroup = new QGroupBox(tr("Local Gateway process"), central);
-    m_startGatewayButton = new QPushButton(tr("Start Gateway"), m_localGroup);
-    m_stopGatewayButton = new QPushButton(tr("Stop Gateway"), m_localGroup);
-    m_gatewayStatusLabel = new QLabel(tr("Stopped"), m_localGroup);
-    auto *localBtnRow = new QHBoxLayout;
-    localBtnRow->addWidget(m_startGatewayButton);
-    localBtnRow->addWidget(m_stopGatewayButton);
-    localBtnRow->addWidget(m_gatewayStatusLabel, /*stretch=*/1);
-    auto *localHint = new QLabel(
-        tr("Runs `openclaw gateway run --port 18789`. On Start, DeepSeek key/model/role "
-           "are written into ~/.openclaw for the Gateway. Chat uses Gateway HTTP, not DeepSeek direct."),
-        m_localGroup);
-    localHint->setWordWrap(true);
-    auto *localLayout = new QVBoxLayout(m_localGroup);
-    localLayout->addWidget(localHint);
-    localLayout->addLayout(localBtnRow);
+    auto *overlay = new QWidget(m_chatChrome);
+    overlay->setAttribute(Qt::WA_TranslucentBackground);
 
-    m_remoteGroup = new QGroupBox(tr("Gateway connection"), central);
-    m_urlEdit = new QLineEdit(m_remoteGroup);
-    m_urlEdit->setPlaceholderText(QStringLiteral("ws://127.0.0.1:18789"));
-    m_urlEdit->setText(QStringLiteral("ws://127.0.0.1:18789"));
-    m_tokenEdit = new QLineEdit(m_remoteGroup);
-    m_tokenEdit->setEchoMode(QLineEdit::Password);
-    m_tokenEdit->setPlaceholderText(tr("Gateway token (optional; else from openclaw.json)"));
-    m_connectButton = new QPushButton(tr("Connect"), m_remoteGroup);
-    m_disconnectButton = new QPushButton(tr("Disconnect"), m_remoteGroup);
-    m_disconnectButton->setEnabled(false);
-    auto *buttonRow = new QHBoxLayout;
-    buttonRow->addWidget(m_connectButton);
-    buttonRow->addWidget(m_disconnectButton);
-    buttonRow->addStretch();
-    auto *form = new QFormLayout;
-    form->addRow(tr("Gateway URL"), m_urlEdit);
-    form->addRow(tr("Token"), m_tokenEdit);
-    form->addRow(QString(), buttonRow);
-    m_remoteGroup->setLayout(form);
+    m_statusLabel = new QLabel(tr("未连接"), overlay);
+    m_statusLabel->setStyleSheet(QStringLiteral(
+        "color: #30d158; background: rgba(0,0,0,140); padding: 4px 10px; border-radius: 8px;"));
 
-    auto *chatGroup = new QGroupBox(
-        tr("Chat（经本地 Gateway，非 DeepSeek 直连）"), central);
-    m_chatList = new QListWidget(chatGroup);
+    m_roleNameLabel = new QLabel(overlay);
+    m_roleNameLabel->setStyleSheet(QStringLiteral(
+        "color: white; font-size: 18px; font-weight: 700;"
+        " background: rgba(0,0,0,120); padding: 4px 12px; border-radius: 8px;"));
+
+    m_avatarLabel = new QLabel(overlay);
+    m_avatarLabel->setFixedSize(72, 72);
+    m_avatarLabel->setStyleSheet(QStringLiteral(
+        "border-radius: 12px; border: 2px solid rgba(255,255,255,180); background: rgba(0,0,0,80);"));
+    m_avatarLabel->setScaledContents(true);
+
+    m_chatList = new QListWidget(overlay);
     m_chatList->setWordWrap(true);
-    m_chatInput = new QPlainTextEdit(chatGroup);
-    m_chatInput->setPlaceholderText(tr("跟%1说点什么…").arg(SettingsDialog::role()));
-    m_chatInput->setMaximumHeight(80);
-    m_sendButton = new QPushButton(tr("Send"), chatGroup);
-    auto *chatInputRow = new QHBoxLayout;
-    chatInputRow->addWidget(m_chatInput, /*stretch=*/1);
-    chatInputRow->addWidget(m_sendButton);
-    auto *chatLayout = new QVBoxLayout(chatGroup);
-    chatLayout->addWidget(m_chatList, /*stretch=*/1);
-    chatLayout->addLayout(chatInputRow);
+    m_chatList->setStyleSheet(QStringLiteral(
+        "QListWidget { background: transparent; border: none; color: white; }"
+        "QListWidget::item { margin: 6px; padding: 8px 12px; border-radius: 12px; }"
+        "QListWidget::item:selected { background: rgba(255,255,255,40); }"));
+
+    m_chatInput = new QPlainTextEdit(overlay);
+    m_chatInput->setPlaceholderText(tr("说点什么…"));
+    m_chatInput->setMaximumHeight(72);
+    m_chatInput->setStyleSheet(QStringLiteral(
+        "QPlainTextEdit { background: rgba(28,28,30,210); color: white; border-radius: 18px;"
+        " padding: 10px 14px; border: 1px solid rgba(255,255,255,40); }"));
+
+    m_sendButton = new QPushButton(tr("发送"), overlay);
+    m_connectButton = new QPushButton(tr("连上"), overlay);
+    m_switchRoleButton = new QPushButton(tr("换角色"), overlay);
+    m_settingsButton = new QPushButton(tr("设置"), overlay);
+    for (QPushButton *b : {m_sendButton, m_connectButton, m_switchRoleButton, m_settingsButton}) {
+        b->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #0a84ff; color: white; border: none; border-radius: 10px;"
+            " padding: 8px 14px; font-weight: 600; }"
+            "QPushButton:hover { background: #409cff; }"
+            "QPushButton:disabled { background: #555; }"));
+    }
+
+    auto *topRow = new QHBoxLayout;
+    topRow->addWidget(m_statusLabel);
+    topRow->addStretch();
+    topRow->addWidget(m_roleNameLabel);
+    topRow->addWidget(m_avatarLabel);
+    topRow->addWidget(m_connectButton);
+    topRow->addWidget(m_switchRoleButton);
+    topRow->addWidget(m_settingsButton);
+
+    auto *inputRow = new QHBoxLayout;
+    inputRow->addWidget(m_chatInput, 1);
+    inputRow->addWidget(m_sendButton);
+
+    auto *overlayLayout = new QVBoxLayout(overlay);
+    overlayLayout->setContentsMargins(16, 16, 16, 16);
+    overlayLayout->addLayout(topRow);
+    overlayLayout->addWidget(m_chatList, 1);
+    overlayLayout->addLayout(inputRow);
+
+    auto *chromeLayout = new QVBoxLayout(m_chatChrome);
+    chromeLayout->setContentsMargins(0, 0, 0, 0);
+    chromeLayout->addWidget(overlay);
 
     m_logView = new QPlainTextEdit(central);
     m_logView->setReadOnly(true);
-    m_logView->setPlaceholderText(tr("Gateway / connection log…"));
     m_logView->setMaximumBlockCount(2000);
-
-    m_statusLabel = new QLabel(tr("Ready"), central);
-
-    auto *splitter = new QSplitter(Qt::Vertical, central);
-    splitter->addWidget(chatGroup);
-    splitter->addWidget(m_logView);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 1);
+    m_logView->setMaximumHeight(120);
+    m_logView->setPlaceholderText(tr("技术日志（可忽略）…"));
+    m_logView->setStyleSheet(QStringLiteral("font-size: 11px; color: #888;"));
 
     auto *layout = new QVBoxLayout(central);
-    layout->addLayout(modeRow);
-    layout->addWidget(m_localGroup);
-    layout->addWidget(m_remoteGroup);
-    layout->addWidget(splitter, /*stretch=*/1);
-    layout->addWidget(m_statusLabel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_chatChrome, 1);
+    layout->addWidget(m_logView);
 }
 
-void MainWindow::applySettingsToClient()
+void MainWindow::applyRole(const QString &roleId, bool resetChat)
 {
-    const QString role = SettingsDialog::role();
-    m_client->setSystemPrompt(Persona::systemPrompt(role));
-    m_client->setBackendModel(SettingsDialog::model());
-    m_client->setGatewayToken(SettingsDialog::gatewayToken());
-    m_client->setGatewayHttpBase(OpenClawConfigSync::gatewayHttpBase(m_gateway->port()));
-    if (m_tokenEdit && m_tokenEdit->text().trimmed().isEmpty())
-        m_tokenEdit->setText(SettingsDialog::gatewayToken());
-    if (m_chatInput)
-        m_chatInput->setPlaceholderText(tr("跟%1说点什么…").arg(role));
-    m_gateway->setDeepSeekApiKey(SettingsDialog::apiKey());
-}
+    const RoleInfo role = RoleLoader::loadRole(roleId);
+    m_roleId = role.id;
+    m_roleDisplayName = role.displayName;
 
-bool MainWindow::syncOpenClawFromSettings(QString *errorOut)
-{
-    if (!SettingsDialog::hasApiKey()) {
-        if (errorOut)
-            *errorOut = tr("No API key in Settings");
-        return false;
+    QSettings s(QString::fromUtf8(kOrg), QString::fromUtf8(kApp));
+    s.setValue(QString::fromUtf8(kKeyRole), m_roleId);
+
+    m_roleNameLabel->setText(m_roleDisplayName);
+    if (resetChat) {
+        m_chat->clearHistory();
+            m_chatList->clear();
+        appendChatBubble(m_roleDisplayName, role.welcomeMessage, false);
     }
-    OpenClawConfigSync::Input in;
-    in.apiKey = SettingsDialog::apiKey();
-    in.model = SettingsDialog::model();
-    in.role = SettingsDialog::role();
-    const OpenClawConfigSync::Result r = OpenClawConfigSync::apply(in);
-    if (!r.ok) {
-        if (errorOut)
-            *errorOut = r.error;
-        return false;
-    }
-    appendLog(QStringLiteral("[openclaw-config]\n%1").arg(r.summary));
-    applySettingsToClient();
-    return true;
+
+    QPixmap av(role.avatarPath);
+    if (!av.isNull())
+        m_avatarLabel->setPixmap(av.scaled(72, 72, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    else
+        m_avatarLabel->setText(m_roleDisplayName.left(1));
+
+    m_bgPixmap = QPixmap(role.backgroundPath);
+    refreshBackground();
+    m_chatInput->setPlaceholderText(tr("跟%1说点什么…").arg(m_roleDisplayName));
 }
 
-bool MainWindow::isLocalMode() const
+void MainWindow::refreshBackground()
 {
-    return m_localRadio && m_localRadio->isChecked();
-}
-
-void MainWindow::onModeChanged()
-{
-    updateModeUi();
-}
-
-void MainWindow::updateModeUi()
-{
-    const bool local = isLocalMode();
-    m_localGroup->setEnabled(local);
-    if (local) {
-        m_urlEdit->setText(m_gateway->defaultUrl());
-        m_urlEdit->setReadOnly(true);
-    } else {
-        m_urlEdit->setReadOnly(false);
-    }
-}
-
-void MainWindow::updateGatewayButtons()
-{
-    const bool running = m_gateway && m_gateway->isRunning();
-    m_startGatewayButton->setEnabled(!running);
-    m_stopGatewayButton->setEnabled(running);
-    m_gatewayStatusLabel->setText(running ? tr("Running") : tr("Stopped"));
-}
-
-void MainWindow::onStartGatewayClicked()
-{
-    const QString cli = m_gateway->resolvedCliPath();
-    if (cli.isEmpty()) {
-        QMessageBox::warning(this, tr("OpenClaw not found"),
-                             m_gateway->resolveError()
-                                 + QStringLiteral("\n\n")
-                                 + tr("Tip (CN): use npmmirror when installing — see README."));
+    if (!m_bgLabel || !m_chatChrome)
+        return;
+    m_bgLabel->setGeometry(m_chatChrome->rect());
+    if (m_bgPixmap.isNull()) {
+        m_bgLabel->setStyleSheet(QStringLiteral("background: #1c1c1e;"));
+        m_bgLabel->clear();
         return;
     }
-
-    QString err;
-    if (SettingsDialog::hasApiKey()) {
-        if (!syncOpenClawFromSettings(&err))
-            appendLog(tr("[openclaw-config] sync failed: %1").arg(err));
-    } else {
-        appendLog(tr("[openclaw-config] skipped (no API key) — chat needs Settings first"));
-    }
-
-    m_urlEdit->setText(m_gateway->defaultUrl());
-    m_gateway->setDeepSeekApiKey(SettingsDialog::apiKey());
-    m_gateway->start();
-    updateGatewayButtons();
-    if (m_gateway->isRunning())
-        onGatewayStarted();
-}
-
-void MainWindow::onStopGatewayClicked()
-{
-    m_gateway->stop();
-    updateGatewayButtons();
-}
-
-void MainWindow::onGatewayStarted()
-{
-    updateGatewayButtons();
-    m_gatewayStatusLabel->setText(tr("Running"));
-    // Auto-wire chat client to local gateway HTTP
-    m_client->setGatewayHttpBase(OpenClawConfigSync::gatewayHttpBase(m_gateway->port()));
-    m_client->connectToGateway(m_gateway->defaultUrl(),
-                               m_tokenEdit->text().trimmed().isEmpty()
-                                   ? SettingsDialog::gatewayToken()
-                                   : m_tokenEdit->text());
-}
-
-void MainWindow::onGatewayStopped()
-{
-    updateGatewayButtons();
-    m_gatewayStatusLabel->setText(tr("Stopped"));
-}
-
-void MainWindow::onConnectClicked()
-{
-    const QString url = m_urlEdit->text().trimmed();
-    const QString token = m_tokenEdit->text().trimmed().isEmpty()
-                              ? SettingsDialog::gatewayToken()
-                              : m_tokenEdit->text();
-    m_client->connectToGateway(url, token);
-    m_connectButton->setEnabled(false);
-    m_disconnectButton->setEnabled(true);
-}
-
-void MainWindow::onDisconnectClicked()
-{
-    m_client->disconnectFromGateway();
-    if (isLocalMode() && m_gateway->isRunning()) {
-        m_gateway->stop();
-        updateGatewayButtons();
-    }
-    m_connectButton->setEnabled(true);
-    m_disconnectButton->setEnabled(false);
+    const QSize sz = m_chatChrome->size();
+    if (sz.width() < 2 || sz.height() < 2)
+        return;
+    m_bgLabel->setPixmap(m_bgPixmap.scaled(sz, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    m_bgLabel->lower();
 }
 
 void MainWindow::ensureApiKeyOrPrompt()
 {
     if (!SettingsDialog::hasApiKey()) {
         SettingsDialog dlg(this);
-        if (dlg.exec() == QDialog::Accepted) {
-            const QString summary = dlg.property("openclawSyncSummary").toString();
-            const QString syncErr = dlg.property("openclawSyncError").toString();
-            if (!summary.isEmpty())
-                appendLog(QStringLiteral("[openclaw-config]\n%1").arg(summary));
-            if (!syncErr.isEmpty())
-                appendLog(tr("[openclaw-config] %1").arg(syncErr));
-            applySettingsToClient();
-        }
+        if (dlg.exec() == QDialog::Accepted)
+            SettingsDialog::loadInto(m_chat);
     }
+}
+
+void MainWindow::onConnectClicked()
+{
+    ensureApiKeyOrPrompt();
+    if (!SettingsDialog::hasApiKey()) {
+        appendLog(tr("[chat] 需要先保存 DeepSeek Key"));
+        return;
+    }
+    QString err;
+    if (!GatewayConfig::configureDeepSeekViaCli(SettingsDialog::apiKey(), &err))
+        appendLog(tr("[config] %1").arg(err));
+    SettingsDialog::loadInto(m_chat);
+
+    if (m_gateway->isRunning()) {
+        setStatus(tr("已就绪"));
+        return;
+    }
+    const QString cli = m_gateway->resolvedCliPath();
+    if (cli.isEmpty()) {
+        QMessageBox::warning(this, tr("未找到 Gateway"),
+                             m_gateway->resolveError()
+                                 + QStringLiteral("\n\n")
+                                 + tr("提示：./scripts/setup-runtime.sh（npmmirror）"));
+        return;
+    }
+    m_gateway->start();
+}
+
+void MainWindow::onGatewayStarted()
+{
+    setStatus(tr("已就绪"));
+    m_connectButton->setText(tr("已连上"));
+}
+
+void MainWindow::onGatewayStopped()
+{
+    setStatus(tr("未连接"));
+    m_connectButton->setText(tr("连上"));
 }
 
 void MainWindow::onSettingsClicked()
 {
     SettingsDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) {
-        const QString summary = dlg.property("openclawSyncSummary").toString();
-        const QString syncErr = dlg.property("openclawSyncError").toString();
-        if (!summary.isEmpty())
-            appendLog(QStringLiteral("[openclaw-config]\n%1").arg(summary));
-        if (!syncErr.isEmpty())
-            appendLog(tr("[openclaw-config] %1").arg(syncErr));
-        applySettingsToClient();
-        appendLog(tr("[settings] Saved; DeepSeek key synced into OpenClaw Gateway config."));
-        // Refresh welcome bubble role label on next clear — update placeholder only
-        m_chatInput->setPlaceholderText(tr("跟%1说点什么…").arg(SettingsDialog::role()));
+        SettingsDialog::loadInto(m_chat);
+        appendLog(tr("[settings] Key 已写入 ~/.qiling-agent"));
     }
+}
+
+void MainWindow::onSwitchRoleClicked()
+{
+    CharacterSelectDialog dlg(m_roleId, this);
+    if (dlg.exec() == QDialog::Accepted && dlg.selectedRoleId() != m_roleId)
+        applyRole(dlg.selectedRoleId(), true);
 }
 
 void MainWindow::onSendClicked()
 {
     ensureApiKeyOrPrompt();
     if (!SettingsDialog::hasApiKey()) {
-        appendLog(tr("[chat] aborted: no API key for Gateway model config"));
+        appendLog(tr("[chat] aborted: no API key"));
         return;
     }
+    if (!m_gateway->isRunning()) {
+        onConnectClicked();
+        if (!m_gateway->isRunning()) {
+            QMessageBox::information(this, tr("请先连上"),
+                                     tr("请先点「连上」启动本地 Gateway（端口 %1）。")
+                                         .arg(GatewayConfig::kDefaultGatewayPort));
+            return;
+        }
+    }
 
-    // Ensure OpenClaw has latest key/persona before chat
-    QString err;
-    syncOpenClawFromSettings(&err);
-
+    SettingsDialog::loadInto(m_chat);
     const QString text = m_chatInput->toPlainText().trimmed();
     if (text.isEmpty())
         return;
-
-    // Ensure HTTP base points at gateway (even without explicit Connect)
-    if (!m_client->isConnected()) {
-        m_client->connectToGateway(m_urlEdit->text().trimmed().isEmpty()
-                                       ? m_gateway->defaultUrl()
-                                       : m_urlEdit->text(),
-                                   m_tokenEdit->text().trimmed().isEmpty()
-                                       ? SettingsDialog::gatewayToken()
-                                       : m_tokenEdit->text());
-    }
-
-    appendChatBubble(tr("You"), text);
+    appendChatBubble(tr("你"), text, true);
     m_chatInput->clear();
-    m_client->sendUserMessage(text);
+    m_chat->sendUserMessage(text);
     onChatBusyChanged();
 }
 
 void MainWindow::onAssistantMessage(const QString &text)
 {
-    appendChatBubble(SettingsDialog::role(), text);
+    appendChatBubble(m_roleDisplayName, text, false);
 }
 
 void MainWindow::onChatError(const QString &message)
 {
     appendLog(QStringLiteral("[chat] %1").arg(message));
-    appendChatBubble(tr("Error"), message);
+    appendChatBubble(tr("错误"), message, false);
 }
 
 void MainWindow::onChatBusyChanged()
 {
-    m_sendButton->setEnabled(!m_client->isBusy());
+    m_sendButton->setEnabled(!m_chat->isBusy());
 }
 
-void MainWindow::appendChatBubble(const QString &who, const QString &text)
+void MainWindow::appendChatBubble(const QString &who, const QString &text, bool fromUser)
 {
-    m_chatList->addItem(QStringLiteral("[%1] %2").arg(who, text));
+    const QString prefix = fromUser ? QStringLiteral("→ ") : QStringLiteral("← ");
+    auto *item = new QListWidgetItem(QStringLiteral("%1[%2] %3").arg(prefix, who, text));
+    item->setTextAlignment(fromUser ? Qt::AlignRight : Qt::AlignLeft);
+    m_chatList->addItem(item);
     m_chatList->scrollToBottom();
 }
 

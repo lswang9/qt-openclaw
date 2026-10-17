@@ -1,0 +1,3 @@
+[submodule "third_party/qiling-agents"]
+	path = third_party/qiling-agents
+	url = https://github.com/lswang9/qiling-agents.git
