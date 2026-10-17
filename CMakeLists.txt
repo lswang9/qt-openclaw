@@ -21,6 +21,12 @@ add_executable(qt-openclaw
     src/MainWindow.cpp
     src/GatewayClient.h
     src/GatewayClient.cpp
+    src/LocalGatewayProcess.h
+    src/LocalGatewayProcess.cpp
+    src/DeepSeekClient.h
+    src/DeepSeekClient.cpp
+    src/SettingsDialog.h
+    src/SettingsDialog.cpp
 )
 
 target_link_libraries(qt-openclaw PRIVATE
