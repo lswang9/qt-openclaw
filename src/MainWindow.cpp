@@ -4,7 +4,9 @@
 #include "GatewayConfig.h"
 #include "LocalGatewayProcess.h"
 #include "RoleLoader.h"
+#include "RoleMaterializer.h"
 #include "SettingsDialog.h"
+#include "SplashPage.h"
 
 #include <QCloseEvent>
 #include <QEvent>
@@ -12,13 +14,12 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QSettings>
-#include <QSplitter>
+#include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -42,6 +43,11 @@ MainWindow::MainWindow(QWidget *parent)
                                    QString::fromUtf8(RoleLoader::kDefaultRoleId)).toString();
     applyRole(roleId, true);
     SettingsDialog::loadInto(m_chat);
+    showSplash();
+
+    connect(m_splash, &SplashPage::startChatClicked, this, &MainWindow::onStartChatClicked);
+    connect(m_splash, &SplashPage::settingsClicked, this, &MainWindow::onSettingsClicked);
+    connect(m_splash, &SplashPage::avatarClicked, this, &MainWindow::onSwitchRoleClicked);
 
     connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::onConnectClicked);
     connect(m_sendButton, &QPushButton::clicked, this, &MainWindow::onSendClicked);
@@ -60,9 +66,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_gateway, &LocalGatewayProcess::stopped, this, [this](int, QProcess::ExitStatus) {
         onGatewayStopped();
     });
-
-    if (!SettingsDialog::hasApiKey())
-        appendLog(tr("[settings] DeepSeek Key not configured yet"));
 }
 
 MainWindow::~MainWindow()
@@ -94,12 +97,18 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 void MainWindow::setupUi()
 {
     setWindowTitle(tr("器灵 Agent"));
-    resize(920, 680);
+    resize(960, 640);
 
-    auto *central = new QWidget(this);
-    setCentralWidget(central);
+    m_stack = new QStackedWidget(this);
+    setCentralWidget(m_stack);
 
-    m_chatChrome = new QWidget(central);
+    m_splash = new SplashPage(m_stack);
+    m_stack->addWidget(m_splash);
+
+    m_chatPage = new QWidget(m_stack);
+    m_stack->addWidget(m_chatPage);
+
+    m_chatChrome = new QWidget(m_chatPage);
     m_chatChrome->installEventFilter(this);
     m_chatChrome->setMinimumHeight(420);
 
@@ -129,7 +138,7 @@ void MainWindow::setupUi()
     m_chatList = new QListWidget(overlay);
     m_chatList->setWordWrap(true);
     m_chatList->setStyleSheet(QStringLiteral(
-        "QListWidget { background: transparent; border: none; color: white; }"
+        "QListWidget { background: rgba(28,28,30,120); border: none; color: white; border-radius: 16px; }"
         "QListWidget::item { margin: 6px; padding: 8px 12px; border-radius: 12px; }"
         "QListWidget::item:selected { background: rgba(255,255,255,40); }"));
 
@@ -175,7 +184,7 @@ void MainWindow::setupUi()
     chromeLayout->setContentsMargins(0, 0, 0, 0);
     chromeLayout->addWidget(overlay);
 
-    m_logView = new QPlainTextEdit(central);
+    m_logView = new QPlainTextEdit(m_chatPage);
     m_logView->setReadOnly(true);
     m_logView->setMaximumBlockCount(2000);
     m_logView->setMaximumHeight(140);
@@ -183,10 +192,31 @@ void MainWindow::setupUi()
     m_logView->setStyleSheet(QStringLiteral("font-size: 11px; color: #888;"));
     m_logView->hide();
 
-    auto *layout = new QVBoxLayout(central);
+    auto *layout = new QVBoxLayout(m_chatPage);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_chatChrome, 1);
     layout->addWidget(m_logView);
+}
+
+void MainWindow::showSplash()
+{
+    if (m_stack)
+        m_stack->setCurrentWidget(m_splash);
+}
+
+void MainWindow::showChat()
+{
+    if (m_stack)
+        m_stack->setCurrentWidget(m_chatPage);
+    refreshBackground();
+}
+
+void MainWindow::onStartChatClicked()
+{
+    showChat();
+    // Soft-connect in background if key present; never block splash with tech errors
+    if (SettingsDialog::hasApiKey() && m_gateway && !m_gateway->isRunning())
+        onConnectClicked();
 }
 
 void MainWindow::updateLogVisibility()
@@ -209,11 +239,19 @@ QString MainWindow::plainChatError(const QString &raw) const
     return tr("出了点问题，请稍后再试。");
 }
 
+void MainWindow::refreshSplash()
+{
+    if (!m_splash)
+        return;
+    m_splash->setRole(m_roleDisplayName, m_welcomeMessage, m_avatarPixmap, m_bgPixmap);
+}
+
 void MainWindow::applyRole(const QString &roleId, bool resetChat)
 {
     const RoleInfo role = RoleLoader::loadRole(roleId);
     m_roleId = role.id;
     m_roleDisplayName = role.displayName;
+    m_welcomeMessage = role.welcomeMessage;
 
     QSettings s(QString::fromUtf8(kOrg), QString::fromUtf8(kApp));
     s.setValue(QString::fromUtf8(kKeyRole), m_roleId);
@@ -225,15 +263,23 @@ void MainWindow::applyRole(const QString &roleId, bool resetChat)
         appendChatBubble(m_roleDisplayName, role.welcomeMessage, false);
     }
 
-    QPixmap av(role.avatarPath);
-    if (!av.isNull())
-        m_avatarLabel->setPixmap(av.scaled(72, 72, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    m_avatarPixmap = QPixmap(role.avatarPath);
+    if (!m_avatarPixmap.isNull())
+        m_avatarLabel->setPixmap(m_avatarPixmap.scaled(72, 72, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
     else
         m_avatarLabel->setText(m_roleDisplayName.left(1));
 
     m_bgPixmap = QPixmap(role.backgroundPath);
     refreshBackground();
+    refreshSplash();
     m_chatInput->setPlaceholderText(tr("跟%1说点什么…").arg(m_roleDisplayName));
+
+    // Official workspace materialize (no Qt systemPrompt assembly)
+    QString matErr;
+    if (!RoleMaterializer::materializeRole(m_roleId, &matErr))
+        appendLog(tr("[role] materialize: %1").arg(matErr));
+    else
+        appendLog(tr("[role] materialized %1").arg(m_roleId));
 }
 
 void MainWindow::refreshBackground()
@@ -319,8 +365,12 @@ void MainWindow::onSettingsClicked()
 void MainWindow::onSwitchRoleClicked()
 {
     CharacterSelectDialog dlg(m_roleId, this);
-    if (dlg.exec() == QDialog::Accepted && dlg.selectedRoleId() != m_roleId)
+    if (dlg.exec() == QDialog::Accepted && dlg.selectedRoleId() != m_roleId) {
         applyRole(dlg.selectedRoleId(), true);
+        // Stay on splash if still there so welcome updates; chat already reset
+        if (m_stack && m_stack->currentWidget() == m_splash)
+            refreshSplash();
+    }
 }
 
 void MainWindow::onSendClicked()

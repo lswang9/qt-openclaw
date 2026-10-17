@@ -84,7 +84,10 @@ RoleInfo RoleLoader::loadRole(const QString &id)
         info.displayName = (roleId == QLatin1String("yinyue")) ? QStringLiteral("银月") : QStringLiteral("巴巴塔");
         info.welcomeMessage = QStringLiteral("你好，我是%1～").arg(info.displayName);
         info.avatarPath = resolveAsset(roleId, {}, QStringLiteral("avatar.jpg"));
-        info.backgroundPath = resolveAsset(roleId, {}, QStringLiteral("bg.jpg"));
+        info.backgroundPath = resolveAsset(roleId, QStringLiteral("assets/bg-fullscreen.jpg"),
+                                           QStringLiteral("bg-fullscreen.jpg"));
+        if (!QFileInfo::exists(info.backgroundPath))
+            info.backgroundPath = resolveAsset(roleId, {}, QStringLiteral("bg.jpg"));
         return info;
     }
 
@@ -100,10 +103,12 @@ RoleInfo RoleLoader::loadRole(const QString &id)
 
     info.avatarPath = resolveAsset(roleId, root.value(QStringLiteral("avatarPath")).toString(),
                                    QStringLiteral("avatar.jpg"));
-    // bg-fullscreen.jpg in pack; shell fallback bg.jpg
+    // Prefer pack bg-fullscreen.jpg; shell qrc fallback bg-fullscreen then bg.jpg
     QString bgRel = root.value(QStringLiteral("backgroundPath")).toString();
-    info.backgroundPath = resolveAsset(roleId, bgRel, QStringLiteral("bg.jpg"));
-    if (!QFileInfo::exists(info.backgroundPath) && !bgRel.isEmpty())
-        info.backgroundPath = resolveAsset(roleId, {}, QStringLiteral("bg.jpg"));
+    if (bgRel.isEmpty())
+        bgRel = QStringLiteral("assets/bg-fullscreen.jpg");
+    info.backgroundPath = resolveAsset(roleId, bgRel, QStringLiteral("bg-fullscreen.jpg"));
+    if (!QFileInfo::exists(info.backgroundPath))
+        info.backgroundPath = resolveAsset(roleId, QStringLiteral("assets/bg.jpg"), QStringLiteral("bg.jpg"));
     return info;
 }

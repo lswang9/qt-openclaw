@@ -18,6 +18,8 @@ set(QT_OPENCLAW_SOURCES
     src/RoleLoader.h src/RoleLoader.cpp
     src/CharacterSelectDialog.h src/CharacterSelectDialog.cpp
     src/SettingsDialog.h src/SettingsDialog.cpp
+    src/SplashPage.h src/SplashPage.cpp
+    src/RoleMaterializer.h src/RoleMaterializer.cpp
     src/Persona.h
     resources/characters.qrc
 )

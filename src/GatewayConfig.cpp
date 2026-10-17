@@ -52,21 +52,30 @@ bool runCli(const QString &program, const QStringList &args,
         *stderrOut = QString::fromUtf8(p.readAllStandardError());
     return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
+
+QStringList withProfile(const QStringList &rest)
+{
+    return GatewayConfig::profileArgs() + rest;
+}
 } // namespace
+
+QStringList GatewayConfig::profileArgs()
+{
+    return {QStringLiteral("--profile"), QString::fromUtf8(kProfileName)};
+}
 
 QString GatewayConfig::stateDir()
 {
-    const QString dir = QDir::home().absoluteFilePath(QStringLiteral(".qiling-agent"));
-    QDir().mkpath(dir);
-    return dir;
+    // Official --profile qiling maps here; do not hand-edit contents.
+    return QDir::home().absoluteFilePath(QStringLiteral(".openclaw-qiling"));
 }
 
 void GatewayConfig::applyProcessEnvironment(QProcessEnvironment &env)
 {
-    const QString home = stateDir();
-    env.insert(QStringLiteral("OPENCLAW_HOME"), home);
-    env.insert(QStringLiteral("OPENCLAW_STATE_DIR"), home);
-    // Avoid accidental use of official default home
+    // Isolation is --profile qiling, not OPENCLAW_HOME override.
+    // Clearing these avoids fighting LaunchAgent ai.openclaw.gateway (~/.openclaw).
+    env.remove(QStringLiteral("OPENCLAW_HOME"));
+    env.remove(QStringLiteral("OPENCLAW_STATE_DIR"));
     env.remove(QStringLiteral("OPENCLAW_CONFIG_PATH"));
 }
 
@@ -78,16 +87,16 @@ QString GatewayConfig::ensureGatewayToken()
         tok = QUuid::createUuid().toString(QUuid::WithoutBraces);
         s.setValue(QString::fromUtf8(kKeyToken), tok);
     }
-    // Best-effort: push token into isolated config via official CLI (no hand-edit)
+    // Best-effort: push token into profile config via official CLI (no hand-edit)
     QString err;
     const QString cli = findOpenclawCli(&err);
     if (!cli.isEmpty()) {
         QString out, errout;
-        runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                     QStringLiteral("gateway.auth.mode"), QStringLiteral("token")},
+        runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                                 QStringLiteral("gateway.auth.mode"), QStringLiteral("token")}),
                {}, &out, &errout, 30000);
-        runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                     QStringLiteral("gateway.auth.token"), tok},
+        runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                                 QStringLiteral("gateway.auth.token"), tok}),
                {}, &out, &errout, 30000);
     }
     return tok;
@@ -110,7 +119,7 @@ QString GatewayConfig::findOpenclawCli(QString *errorOut)
         if (!c.isEmpty() && QFileInfo::exists(c) && QFileInfo(c).isExecutable())
             return c;
     }
-    // Last resort: known user global binary path (binary only; state stays ~/.qiling-agent)
+    // Binary only; state is --profile qiling → ~/.openclaw-qiling
     const QString homeBin = QDir::home().absoluteFilePath(QStringLiteral(".openclaw/bin/openclaw"));
     if (QFileInfo::exists(homeBin) && QFileInfo(homeBin).isExecutable())
         return homeBin;
@@ -137,52 +146,51 @@ bool GatewayConfig::configureDeepSeekViaCli(const QString &apiKey, QString *erro
         return false;
     }
 
-    // Ensure directory exists for CLI state
-    stateDir();
-
     QString out, err;
 
-    // Port isolation
-    if (!runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                      QStringLiteral("gateway.port"), QString::number(kDefaultGatewayPort)},
+    // Port isolation under profile (CLI writes; shell does not touch files)
+    if (!runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                                  QStringLiteral("gateway.port"), QString::number(kDefaultGatewayPort)}),
                 {}, &out, &err)) {
         qWarning().noquote() << "[GatewayConfig] config set gateway.port:" << err << out;
-        // continue — may already be set
     }
 
-    runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                 QStringLiteral("gateway.bind"), QStringLiteral("loopback")},
+    runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                             QStringLiteral("gateway.bind"), QStringLiteral("loopback")}),
            {}, &out, &err);
-    runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                 QStringLiteral("gateway.mode"), QStringLiteral("local")},
+    runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                             QStringLiteral("gateway.mode"), QStringLiteral("local")}),
            {}, &out, &err);
-    runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                 QStringLiteral("gateway.http.endpoints.chatCompletions.enabled"), QStringLiteral("true")},
+    runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                             QStringLiteral("gateway.http.endpoints.chatCompletions.enabled"),
+                             QStringLiteral("true")}),
            {}, &out, &err);
-    runCli(cli, {QStringLiteral("config"), QStringLiteral("set"),
-                 QStringLiteral("agents.defaults.model.primary"), QStringLiteral("deepseek/deepseek-flash")},
+    runCli(cli, withProfile({QStringLiteral("config"), QStringLiteral("set"),
+                             QStringLiteral("agents.defaults.model.primary"),
+                             QStringLiteral("deepseek/deepseek-flash")}),
            {}, &out, &err);
-    runCli(cli, {QStringLiteral("plugins"), QStringLiteral("enable"), QStringLiteral("deepseek"),
-                 QStringLiteral("--accept-capabilities")},
+    runCli(cli, withProfile({QStringLiteral("plugins"), QStringLiteral("enable"),
+                             QStringLiteral("deepseek"), QStringLiteral("--accept-capabilities")}),
            {}, &out, &err);
 
     // Auth via official paste-api-key (key on stdin; never logged)
     const bool ok = runCli(cli,
-                           {QStringLiteral("models"), QStringLiteral("auth"), QStringLiteral("paste-api-key"),
-                            QStringLiteral("--provider"), QStringLiteral("deepseek")},
+                           withProfile({QStringLiteral("models"), QStringLiteral("auth"),
+                                        QStringLiteral("paste-api-key"),
+                                        QStringLiteral("--provider"), QStringLiteral("deepseek")}),
                            key.toUtf8() + '\n', &out, &err, 90000);
     if (!ok) {
-        // Common: CLI refuses when a system Gateway still points at ~/.openclaw
         QString msg = err.trimmed().isEmpty() ? out.trimmed() : err.trimmed();
         if (msg.size() > 600)
             msg = msg.left(600) + QStringLiteral("…");
         if (errorOut)
-            *errorOut = QStringLiteral("openclaw models auth paste-api-key failed: %1").arg(msg);
+            *errorOut = QStringLiteral("openclaw --profile qiling models auth paste-api-key failed: %1")
+                            .arg(msg);
         qWarning() << "[GatewayConfig] paste-api-key failed (key redacted)";
         return false;
     }
 
     ensureGatewayToken();
-    qInfo() << "[GatewayConfig] DeepSeek key configured via CLI under ~/.qiling-agent (key not logged)";
+    qInfo() << "[GatewayConfig] DeepSeek key configured via --profile qiling → ~/.openclaw-qiling (key not logged)";
     return true;
 }

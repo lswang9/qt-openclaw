@@ -6,7 +6,7 @@
 
 /**
  * Launches local OpenClaw Gateway as QProcess.
- * Env: OPENCLAW_STATE_DIR via GatewayConfig (never ~/.openclaw).
+ * Isolation: openclaw --profile qiling (state ~/.openclaw-qiling; never ~/.openclaw).
  */
 class LocalGatewayProcess : public QObject
 {

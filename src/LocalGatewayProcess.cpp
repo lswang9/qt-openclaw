@@ -112,8 +112,8 @@ LocalGatewayProcess::LaunchPlan LocalGatewayProcess::buildLaunchPlan()
     if (cli.isEmpty())
         return plan;
 
-    // Config written before start; no --allow-unconfigured
-    const QStringList gatewayArgs = {
+    // Official profile isolation; no --allow-unconfigured; no hand-edit config
+    const QStringList gatewayArgs = GatewayConfig::profileArgs() + QStringList{
         QStringLiteral("gateway"),
         QStringLiteral("run"),
         QStringLiteral("--port"),
@@ -153,7 +153,9 @@ void LocalGatewayProcess::start()
 
     emit logMessage(tr("[gateway] starting: %1 %2")
                         .arg(plan.program, plan.arguments.join(QLatin1Char(' '))));
-    emit logMessage(tr("[gateway] OPENCLAW_STATE_DIR=%1").arg(GatewayConfig::stateDir()));
+    emit logMessage(tr("[gateway] --profile %1 → %2")
+                        .arg(QString::fromUtf8(GatewayConfig::kProfileName),
+                             GatewayConfig::stateDir()));
     emit statusChanged(tr("正在连接…"));
 
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();

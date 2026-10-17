@@ -5,12 +5,13 @@
 #include <QString>
 
 class QLabel;
-class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
+class QStackedWidget;
 class GatewayChatClient;
 class LocalGatewayProcess;
+class SplashPage;
 struct RoleInfo;
 
 class MainWindow : public QMainWindow
@@ -30,6 +31,7 @@ private slots:
     void onSendClicked();
     void onSettingsClicked();
     void onSwitchRoleClicked();
+    void onStartChatClicked();
     void onAssistantMessage(const QString &text);
     void onChatError(const QString &message);
     void onChatBusyChanged();
@@ -42,11 +44,18 @@ private:
     void setupUi();
     void applyRole(const QString &roleId, bool resetChat);
     void refreshBackground();
+    void refreshSplash();
     void appendChatBubble(const QString &who, const QString &text, bool fromUser);
     void ensureApiKeyOrPrompt();
     void updateLogVisibility();
     QString plainChatError(const QString &raw) const;
+    void showSplash();
+    void showChat();
 
+    QStackedWidget *m_stack = nullptr;
+    SplashPage *m_splash = nullptr;
+
+    QWidget *m_chatPage = nullptr;
     QWidget *m_chatChrome = nullptr;
     QLabel *m_bgLabel = nullptr;
     QLabel *m_avatarLabel = nullptr;
@@ -65,4 +74,6 @@ private:
     QString m_roleId;
     QString m_roleDisplayName;
     QPixmap m_bgPixmap;
+    QPixmap m_avatarPixmap;
+    QString m_welcomeMessage;
 };

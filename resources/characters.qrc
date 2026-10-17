@@ -2,6 +2,8 @@
 <qresource prefix="/">
   <file>characters/babata/avatar.jpg</file>
   <file>characters/babata/bg.jpg</file>
+  <file>characters/babata/bg-fullscreen.jpg</file>
   <file>characters/yinyue/avatar.jpg</file>
   <file>characters/yinyue/bg.jpg</file>
+  <file>characters/yinyue/bg-fullscreen.jpg</file>
 </qresource></RCC>

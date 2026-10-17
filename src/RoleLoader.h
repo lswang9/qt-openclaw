@@ -19,7 +19,7 @@ class RoleLoader
 {
 public:
     static constexpr int kMinSchemaVersion = 1;
-    static constexpr int kMaxSchemaVersion = 2;
+    static constexpr int kMaxSchemaVersion = 3;
     static constexpr auto kDefaultRoleId = "babata";
 
     static QString agentsRoot();
