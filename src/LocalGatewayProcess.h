@@ -32,6 +32,9 @@ public:
     int port() const { return m_port; }
     void setPort(int port);
 
+    /** Injected into gateway child env as DEEPSEEK_API_KEY (Gateway uses DeepSeek). */
+    void setDeepSeekApiKey(const QString &key) { m_deepSeekApiKey = key.trimmed(); }
+
     /** Resolve CLI path without starting; empty if not found. */
     QString resolvedCliPath() const;
     QString resolveError() const { return m_resolveError; }
@@ -67,4 +70,5 @@ private:
     QProcess *m_process = nullptr;
     int m_port = kDefaultPort;
     mutable QString m_resolveError;
+    QString m_deepSeekApiKey;
 };

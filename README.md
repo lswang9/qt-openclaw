@@ -1,25 +1,57 @@
-# qt-openclaw
+# qt-openclaw（器灵）
 
 中文 | English
 
-Qt 桌面壳，面向 **OpenClaw Gateway**：本地启动 Gateway 进程、远程 WS 连接（占位）、以及 **DeepSeek 直连聊天**（MVP）。
+Qt 桌面壳 **器灵**：本地启动 OpenClaw Gateway、把 DeepSeek API Key 写入 Gateway 配置，聊天经 **本地 Gateway**（HTTP `/v1/chat/completions`），**不**从 Qt 直连 `api.deepseek.com`。
 
-Qt desktop shell for **OpenClaw Gateway**: local Gateway process lifecycle, remote WS stub, and **DeepSeek direct chat** (MVP).
+Qt desktop shell (**器灵**): start local OpenClaw Gateway, configure DeepSeek **into** the Gateway, chat via **local Gateway** HTTP — not direct DeepSeek from the client.
 
-## Features / 功能（MVP）
+角色自称默认 **巴巴塔**（可选 **银月**）。「器灵」仅为产品/App 名，不进 system prompt 人设自称与欢迎语。
+
+## Features / 功能
 
 | Feature | Notes |
 |---------|--------|
-| **Local Gateway** | Start/stop `openclaw gateway run --port 18789` via `QProcess` (`LocalGatewayProcess`) |
-| **Remote Gateway** | URL + token fields; WS client still stub |
-| **Chat** | Message list + input; calls **DeepSeek** `POST /chat/completions` directly (OpenAI-compatible). **Not** via Gateway yet |
-| **Settings** | DeepSeek API key / base URL / model in `QSettings` (local only; never committed) |
+| **Local Gateway** | Start/stop `openclaw gateway run --port 18789` (`LocalGatewayProcess`); injects `DEEPSEEK_API_KEY` |
+| **OpenClaw config sync** | On Settings Save / Start Gateway: write `~/.openclaw` (see below) |
+| **Chat** | `GatewayClient` → `POST http://127.0.0.1:18789/v1/chat/completions` with Gateway token |
+| **Persona** | Roles 巴巴塔 / 银月; welcome「你好，我是巴巴塔～」 |
+| **Settings** | DeepSeek key + model + role + Gateway token in `QSettings`; key synced into OpenClaw |
 
-Default local WS URL: `ws://127.0.0.1:18789` (OpenClaw default port).
+Default local URL: `ws://127.0.0.1:18789` (HTTP chat on the same port).
 
 ### Chat path (important)
 
-MVP chat uses **DeepSeek HTTP API directly** (`https://api.deepseek.com`), not OpenClaw Gateway protocol. Local Gateway mode is for process lifecycle / future WS integration.
+```
+Qt UI ──HTTP──► Local OpenClaw Gateway ──► DeepSeek API
+         /v1/chat/completions
+```
+
+- Qt **does not** call `https://api.deepseek.com`.
+- DeepSeek key is stored for Gateway via `OpenClawConfigSync` + process env.
+- Legacy `DeepSeekClient` remains in tree but is **demoted** (not on the hot path).
+
+### How config is written (`OpenClawConfigSync`)
+
+| Path | What |
+|------|------|
+| `~/.openclaw/.env` | `DEEPSEEK_API_KEY=…` |
+| `~/.openclaw/agents/main/agent/auth-profiles.json` | profile `deepseek:manual` (`type: api_key`) |
+| `~/.openclaw/openclaw.json` | `agents.defaults.model`, `agents.entries.main.identity.name`, `plugins.entries.deepseek.enabled`, `gateway.http.endpoints.chatCompletions.enabled`, `auth.profiles.deepseek:manual` |
+| `~/.openclaw/workspace/IDENTITY.md` | Name = role (巴巴塔 / 银月) |
+
+Also on Start Gateway: child process env gets `DEEPSEEK_API_KEY` and `OPENCLAW_HOME`.
+
+### Self-intro copy locations
+
+| Location | Content |
+|----------|---------|
+| `src/Persona.h` | `welcomeMessage`, `systemPrompt`, `identityMarkdown` |
+| Chat empty/welcome bubble | MainWindow ctor → `Persona::welcomeMessage(role)` |
+| Gateway agent identity | `openclaw.json` → `agents.entries.main.identity` + `IDENTITY.md` |
+| Per-request system message | `GatewayClient` history system role from `Persona::systemPrompt` |
+
+Product window title uses 「器灵」; assistant bubbles use the role name.
 
 ## Build / 构建
 
@@ -27,11 +59,10 @@ MVP chat uses **DeepSeek HTTP API directly** (`https://api.deepseek.com`), not O
 
 - CMake ≥ 3.21
 - C++17 compiler
-- [Conan 2](https://docs.conan.io/) (`pip install conan` or package manager)
+- [Conan 2](https://docs.conan.io/)
 
 ```bash
 export PATH="/Users/wangyupeng/.conan2/p/cmake6cfb420416116/p/CMake.app/Contents/bin:$HOME/Library/Python/3.9/bin:$PATH"
-# adjust cmake path if your Conan package hash differs
 
 conan profile detect
 conan install . --output-folder=build --build=missing -s build_type=Release
@@ -39,73 +70,38 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/build/Release/generators/conan_
 cmake --build build
 ```
 
-Binary (after build): `build/qt-openclaw`
+Binary: `build/qt-openclaw`
 
-> First Conan Qt build can be **very slow**.
+## Local Gateway runtime
 
-### Optional: system Qt
-
-```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x.x/macos -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-```
-
-## Local Gateway runtime / 本地 Gateway 运行时
-
-The app looks for OpenClaw in this order:
-
-1. `OPENCLAW_RUNTIME` env → `bin/openclaw`
-2. `./runtime/bin/openclaw` (next to binary / repo)
-3. `openclaw` on `PATH`
-4. `node` + `runtime/node_modules/openclaw/dist/entry.js`
-
-### Populate `runtime/` (China mirror)
-
-官方 npm 源在国内常不可用。请用 **npmmirror**：
+Discovery order: `OPENCLAW_RUNTIME` → `./runtime/bin/openclaw` → `openclaw` on `PATH` → `node` + `runtime/node_modules/openclaw/dist/entry.js`.
 
 ```bash
-./scripts/setup-runtime.sh
-# default registry: https://registry.npmmirror.com
-# override: NPM_MIRROR=https://registry.npmmirror.com ./scripts/setup-runtime.sh
+./scripts/setup-runtime.sh   # npmmirror by default
 ```
-
-Or manually:
-
-```bash
-mkdir -p runtime && cd runtime
-npm install openclaw@latest --registry=https://registry.npmmirror.com --prefix .
-```
-
-Do **not** commit `runtime/node_modules/`. See `runtime/README.md`.
-
-If you already have a global install (`openclaw` on PATH), Local mode works without `runtime/`.
-
-Foreground command used by the app:
 
 ```bash
 openclaw gateway run --port 18789 --verbose --allow-unconfigured
 ```
 
-## DeepSeek settings / 模型配置
+## Settings / 模型与角色
 
-1. Open **Settings…** in the app (first send also prompts if key missing).
-2. Paste API key from https://platform.deepseek.com
-3. Defaults: base URL `https://api.deepseek.com`, model `deepseek-flash`
-4. Stored in `QSettings` org/app `qt-openclaw` — **never commit secrets**
+1. **Settings…** — paste DeepSeek API key (written into Gateway, not used for direct client HTTP).
+2. Model default: `deepseek-flash` → stored as `deepseek/deepseek-flash` in OpenClaw.
+3. Role: **巴巴塔** (default) or **银月**.
+4. Optional Gateway token (else read from `openclaw.json` `gateway.auth.token`).
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `conanfile.py` | Conan 2 deps (`qt/6.7.3`) |
-| `CMakeLists.txt` | Qt Widgets app |
-| `src/MainWindow.*` | Mode, gateway controls, chat, log |
-| `src/LocalGatewayProcess.*` | `QProcess` launcher for local Gateway |
-| `src/GatewayClient.*` | Stub WS client |
-| `src/DeepSeekClient.*` | Direct chat completions HTTP client |
-| `src/SettingsDialog.*` | DeepSeek key / URL / model |
-| `scripts/setup-runtime.sh` | npm install OpenClaw via npmmirror |
-| `runtime/` | Optional bundled CLI (node_modules gitignored) |
+| `src/MainWindow.*` | Mode, gateway, chat UI |
+| `src/LocalGatewayProcess.*` | `QProcess` launcher + env |
+| `src/GatewayClient.*` | Gateway HTTP chat (+ WS connect stub log) |
+| `src/OpenClawConfigSync.*` | Write `~/.openclaw` for DeepSeek + persona |
+| `src/Persona.h` | Role / welcome / system prompt |
+| `src/SettingsDialog.*` | Key / model / role / token |
+| `src/DeepSeekClient.*` | Legacy direct HTTP (demoted) |
 
 ## License
 

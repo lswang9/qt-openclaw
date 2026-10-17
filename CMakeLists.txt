@@ -23,10 +23,14 @@ add_executable(qt-openclaw
     src/GatewayClient.cpp
     src/LocalGatewayProcess.h
     src/LocalGatewayProcess.cpp
-    src/DeepSeekClient.h
-    src/DeepSeekClient.cpp
+    src/OpenClawConfigSync.h
+    src/OpenClawConfigSync.cpp
+    src/Persona.h
     src/SettingsDialog.h
     src/SettingsDialog.cpp
+    # Legacy direct DeepSeek HTTP — demoted; not used by MainWindow hot path
+    src/DeepSeekClient.h
+    src/DeepSeekClient.cpp
 )
 
 target_link_libraries(qt-openclaw PRIVATE

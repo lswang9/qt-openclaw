@@ -1,3 +1,4 @@
+// LEGACY: demoted from hot path. Prefer GatewayClient → local OpenClaw Gateway.
 #include "DeepSeekClient.h"
 
 #include <QJsonArray>
@@ -67,7 +68,7 @@ QUrl DeepSeekClient::completionsUrl() const
 QByteArray DeepSeekClient::buildRequestBody() const
 {
     QJsonArray messages;
-    for (const ChatMessage &m : m_history) {
+    for (const DeepSeekChatMessage &m : m_history) {
         QJsonObject o;
         o.insert(QStringLiteral("role"), m.role);
         o.insert(QStringLiteral("content"), m.content);

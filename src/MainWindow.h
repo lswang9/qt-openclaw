@@ -11,7 +11,6 @@ class QListWidget;
 class QGroupBox;
 class GatewayClient;
 class LocalGatewayProcess;
-class DeepSeekClient;
 
 class MainWindow : public QMainWindow
 {
@@ -46,6 +45,8 @@ private:
     void updateGatewayButtons();
     void appendChatBubble(const QString &who, const QString &text);
     void ensureApiKeyOrPrompt();
+    void applySettingsToClient();
+    bool syncOpenClawFromSettings(QString *errorOut = nullptr);
     bool isLocalMode() const;
 
     QRadioButton *m_localRadio = nullptr;
@@ -68,5 +69,4 @@ private:
 
     GatewayClient *m_client = nullptr;
     LocalGatewayProcess *m_gateway = nullptr;
-    DeepSeekClient *m_chat = nullptr;
 };

@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QProcessEnvironment>
 
 LocalGatewayProcess::LocalGatewayProcess(QObject *parent)
     : QObject(parent)
@@ -165,6 +166,15 @@ void LocalGatewayProcess::start()
     m_process->setWorkingDirectory(plan.workingDirectory);
     m_process->setProgram(plan.program);
     m_process->setArguments(plan.arguments);
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    if (!m_deepSeekApiKey.isEmpty())
+        env.insert(QStringLiteral("DEEPSEEK_API_KEY"), m_deepSeekApiKey);
+    // Prefer user OpenClaw home so Gateway picks up ~/.openclaw/.env + openclaw.json
+    env.insert(QStringLiteral("OPENCLAW_HOME"),
+               QDir::home().absoluteFilePath(QStringLiteral(".openclaw")));
+    m_process->setProcessEnvironment(env);
+
     m_process->start();
 }
 
