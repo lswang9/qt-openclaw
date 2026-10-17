@@ -1,0 +1,31 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Conan / CMake user presets (generated locally)
+CMakeUserPresets.json
+generators/
+CMakeDeps/
+CMakeToolchain/
+
+# IDE / tooling
+*.user
+*.user.*
+.vs/
+.vscode/
+.idea/
+*.autosave
+.DS_Store
+
+# Qt / moc leftovers
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*_autogen/
