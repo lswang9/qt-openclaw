@@ -29,3 +29,9 @@ moc_*.cpp
 ui_*.h
 qrc_*.cpp
 *_autogen/
+
+# Local OpenClaw runtime (large; populate via scripts/setup-runtime.sh)
+runtime/node_modules/
+runtime/package-lock.json
+runtime/package.json
+!runtime/README.md
